@@ -138,23 +138,97 @@ def get_metrics():
 
 @app.route('/api/v1/summary', methods=['GET'])
 def get_summary():
+    cur = mysql.connection.cursor()
+
+    location_id = request.args.get('location_id', type=int)
+    metric = request.args.get('metric')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    quality_threshold = request.args.get('quality_threshold')
+
+    metric_norm = metric.lower().strip() if metric else None
+    qt_norm = quality_threshold.lower().strip() if quality_threshold else None
+
+    # CASE gives weights for weighted average
+    # FIELD handles quality threshold rank
+    sql = """
+    SELECT
+      m.name AS metric,
+      m.unit AS unit,
+      MIN(cd.value) AS min_value,
+      MAX(cd.value) AS max_value,
+      AVG(cd.value) AS avg_value,
+      SUM(cd.value * CASE cd.quality
+          WHEN 'excellent' THEN 1.0
+          WHEN 'good' THEN 0.8
+          WHEN 'questionable' THEN 0.5
+          WHEN 'poor' THEN 0.3
+          ELSE 0 END
+      ) / NULLIF(SUM(CASE cd.quality
+          WHEN 'excellent' THEN 1.0
+          WHEN 'good' THEN 0.8
+          WHEN 'questionable' THEN 0.5
+          WHEN 'poor' THEN 0.3
+          ELSE 0 END
+      ), 0) AS weighted_avg,
+      SUM(cd.quality = 'excellent') AS q_excellent,
+      SUM(cd.quality = 'good') AS q_good,
+      SUM(cd.quality = 'questionable') AS q_questionable,
+      SUM(cd.quality = 'poor') AS q_poor,
+      COUNT(*) AS total_count
+    FROM climate_data cd
+    JOIN metrics m ON m.id = cd.metric_id
+    WHERE
+      (%s IS NULL OR cd.location_id = %s) AND
+      (%s IS NULL OR m.name = %s) AND
+      (%s IS NULL OR cd.date >= %s) AND
+      (%s IS NULL OR cd.date <= %s) AND
+      (
+        %s IS NULL OR
+        FIELD(cd.quality, 'poor','questionable','good','excellent')
+          >= FIELD(%s, 'poor','questionable','good','excellent')
+      )
+    GROUP BY m.id, m.name, m.unit
+    ORDER BY m.name ASC
     """
-    Retrieve quality-weighted summary statistics for climate data.
-    Query parameters: location_id, start_date, end_date, metric, quality_threshold
-    
-    Returns weighted min, max, and avg values for each metric in the format specified in the API docs.
-    """
-    # TODO: Implement this endpoint
-    # 1. Get query parameters from request.args
-    # 2. Validate quality_threshold if provided
-    # 3. Get list of metrics to summarize
-    # 4. For each metric:
-    #    - Calculate quality-weighted statistics using QUALITY_WEIGHTS
-    #    - Calculate quality distribution
-    #    - Apply proper filtering
-    # 5. Format response according to API specification
-    
-    return jsonify({"data": {}})
+
+    params = [
+        location_id, location_id,
+        metric_norm, metric_norm,
+        start_date, start_date,
+        end_date, end_date,
+        qt_norm, qt_norm
+    ]
+
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+
+    result = {}
+    for r in rows:
+        total = r["total_count"] or 0
+        if total <= 0:
+            continue
+        q_ex = r["q_excellent"] or 0
+        q_go = r["q_good"] or 0
+        q_qu = r["q_questionable"] or 0
+        q_po = r["q_poor"] or 0
+
+        result[r["metric"]] = {
+            "min": r["min_value"],
+            "max": r["max_value"],
+            "avg": r["avg_value"],
+            "weighted_avg": round(r["weighted_avg"], 1),
+            "unit": r["unit"],
+            "quality_distribution": {
+                "excellent": round(q_ex / total, 1),
+                "good": round(q_go / total, 1),
+                "questionable": round(q_qu / total, 1),
+                "poor": round(q_po / total, 1),
+            },
+        }
+
+    return jsonify({"data": result}), 200
 
 @app.route('/api/v1/trends', methods=['GET'])
 def get_trends():
