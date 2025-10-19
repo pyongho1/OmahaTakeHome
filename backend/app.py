@@ -30,6 +30,7 @@ QUALITY_WEIGHTS = {
     'poor': 0.3
 }
 
+# Debug purposes only
 @app.get("/debug/counts")
 def debug_counts():
     cur = mysql.connection.cursor()
@@ -42,20 +43,73 @@ def debug_counts():
 
 @app.route('/api/v1/climate', methods=['GET'])
 def get_climate_data():
+    cur = mysql.connection.cursor()
+
+    location_id = request.args.get('location_id', type=int)
+    metric = request.args.get('metric')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    quality_threshold = request.args.get('quality_threshold')
+
+    metric_norm = metric.lower().strip() if metric else None
+    qt_norm = quality_threshold.lower().strip() if quality_threshold else None
+
+    # "param is NULL OR condition" to avoid building SQL dynamically and making the filter optional!
+    sql = """
+    SELECT
+      cd.id,
+      cd.location_id,
+      l.name AS location_name,
+      l.latitude,
+      l.longitude,
+      cd.date,
+      m.name AS metric,
+      m.unit,
+      cd.value,
+      cd.quality
+    FROM climate_data cd
+    JOIN locations l ON l.id = cd.location_id
+    JOIN metrics m ON m.id = cd.metric_id
+    WHERE
+      (%s IS NULL OR cd.location_id = %s) AND
+      (%s IS NULL OR m.name = %s) AND
+      (%s IS NULL OR cd.date >= %s) AND
+      (%s IS NULL OR cd.date <= %s) AND
+      (
+        %s IS NULL OR
+        FIELD(cd.quality, 'poor','questionable','good','excellent')
+          >= FIELD(%s, 'poor','questionable','good','excellent')
+      )
+    ORDER BY cd.date ASC, cd.id ASC
     """
-    Retrieve climate data with optional filtering.
-    Query parameters: location_id, start_date, end_date, metric, quality_threshold
-    
-    Returns climate data in the format specified in the API docs.
-    """
-    # TODO: Implement this endpoint
-    # 1. Get query parameters from request.args
-    # 2. Validate quality_threshold if provided
-    # 3. Build and execute SQL query with proper JOINs and filtering
-    # 4. Apply quality threshold filtering
-    # 5. Format response according to API specification
-    
-    return jsonify({"data": [], "meta": {"total_count": 0, "page": 1, "per_page": 50}})
+
+    params = [
+        location_id, location_id,
+        metric_norm, metric_norm,
+        start_date, start_date,
+        end_date, end_date,
+        qt_norm, qt_norm
+    ]
+
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+
+    data = []
+    for r in rows:
+        item = dict(r)
+        if item.get("date"):
+            item["date"] = item["date"].isoformat()
+        data.append(item)
+
+    return jsonify({
+        "data": data,
+        "meta": {
+            "total_count": len(data),
+            "page": 1,
+            "per_page": len(data)
+        }
+    }), 200
 
 @app.route('/api/v1/locations', methods=['GET'])
 def get_locations():
@@ -124,39 +178,3 @@ def get_trends():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-# Optional: FastAPI Implementation boilerplate
-"""
-To implement the API using FastAPI instead of Flask:
-
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, Dict, List, Any
-import databases
-import os
-
-# Database connection
-DATABASE_URL = f"mysql://{os.environ.get('MYSQL_USER', 'root')}:{os.environ.get('MYSQL_PASSWORD', '')}@{os.environ.get('MYSQL_HOST', 'localhost')}/{os.environ.get('MYSQL_DB', 'climate_data')}"
-database = databases.Database(DATABASE_URL)
-
-app = FastAPI(title="EcoVision API")
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.on_event("startup")
-async def startup():
-    await database.connect()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await database.disconnect()
-
-# Implement endpoints following the API specification in docs/api.md
-"""
