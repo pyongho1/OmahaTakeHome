@@ -59,16 +59,15 @@ def get_climate_data():
 
 @app.route('/api/v1/locations', methods=['GET'])
 def get_locations():
-    """
-    Retrieve all available locations.
-    
-    Returns location data in the format specified in the API docs.
-    """
-    # TODO: Implement this endpoint
-    # 1. Query the locations table
-    # 2. Format response according to API specification
-    
-    return jsonify({"data": []})
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT id, name, country, latitude, longitude
+        FROM locations
+        ORDER BY id ASC
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    return jsonify({"data": rows}), 200
 
 @app.route('/api/v1/metrics', methods=['GET'])
 def get_metrics():
