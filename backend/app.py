@@ -72,16 +72,16 @@ def get_locations():
 
 @app.route('/api/v1/metrics', methods=['GET'])
 def get_metrics():
-    """
-    Retrieve all available climate metrics.
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT id, name, display_name, unit, description
+        FROM metrics
+        ORDER BY id ASC
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    return jsonify({"data": rows}), 200
     
-    Returns metric data in the format specified in the API docs.
-    """
-    # TODO: Implement this endpoint
-    # 1. Query the metrics table
-    # 2. Format response according to API specification
-    
-    return jsonify({"data": []})
 
 @app.route('/api/v1/summary', methods=['GET'])
 def get_summary():
