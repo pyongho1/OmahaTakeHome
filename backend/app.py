@@ -5,16 +5,21 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_mysqldb import MySQL
+from pathlib import Path
+from dotenv import load_dotenv
 import os
 
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
 # MySQL Configuration
-app.config['MYSQL_HOST'] = os.environ.get('MYSQL_HOST', 'localhost')
-app.config['MYSQL_USER'] = os.environ.get('MYSQL_USER', 'root')
-app.config['MYSQL_PASSWORD'] = os.environ.get('MYSQL_PASSWORD', '')
-app.config['MYSQL_DB'] = os.environ.get('MYSQL_DB', 'climate_data')
+app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST')
+app.config['MYSQL_USER'] = os.getenv('MYSQL_USER')
+app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD')
+app.config['MYSQL_DB'] = os.getenv('MYSQL_DB')
+app.config['MYSQL_CURSORCLASS'] = os.getenv('MYSQL_CURSORCLASS')
 mysql = MySQL(app)
 
 # Quality weights to be used in calculations
@@ -24,6 +29,16 @@ QUALITY_WEIGHTS = {
     'questionable': 0.5,
     'poor': 0.3
 }
+
+@app.get("/debug/counts")
+def debug_counts():
+    cur = mysql.connection.cursor()
+    out = {}
+    for t in ("locations","metrics","climate_data"):
+        cur.execute(f"SELECT COUNT(*) AS n FROM {t}")
+        out[t] = cur.fetchone()["n"]
+    cur.close()
+    return out, 200
 
 @app.route('/api/v1/climate', methods=['GET'])
 def get_climate_data():

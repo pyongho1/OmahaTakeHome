@@ -88,7 +88,7 @@
     {"id": 33, "location_id": 3, "metric_id": 2, "date": "2025-01-01", "value": 32.7, "quality": "excellent"},
     {"id": 34, "location_id": 3, "metric_id": 2, "date": "2025-01-15", "value": 33.5, "quality": "excellent"},
     {"id": 35, "location_id": 3, "metric_id": 2, "date": "2025-02-01", "value": 34.1, "quality": "excellent"},
-    {"id": 36, "location_id": 3, "metric_id": 2, "date": "2025-02-15", "value": 89.8, "quality": "excellent"}, // Anomaly
+    {"id": 36, "location_id": 3, "metric_id": 2, "date": "2025-02-15", "value": 89.8, "quality": "excellent"}, 
     {"id": 37, "location_id": 3, "metric_id": 2, "date": "2025-03-01", "value": 34.8, "quality": "excellent"},
     {"id": 38, "location_id": 3, "metric_id": 2, "date": "2025-03-15", "value": 33.9, "quality": "excellent"},
     {"id": 39, "location_id": 3, "metric_id": 2, "date": "2025-04-01", "value": 32.8, "quality": "excellent"},
