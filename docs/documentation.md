@@ -252,9 +252,5 @@ FIELD(cd.quality, 'poor','questionable','good','excellent')
 
 ## Future improvements
 - Add OpenAPI docs and request validation
-- Pagination and caching for large datasets
-- More robust trend/seasonality modeling
-- Configurable quality weights per request
-- Index tuning and performance testing with larger data
-
+- Using AI to dynamically summarize the datas so that it's more easier for any users to understand these stats.
 
