@@ -6,6 +6,7 @@ function Filters({ locations, metrics, filters, onFilterChange, onApplyFilters }
   const qualityOptions = ['excellent', 'good', 'questionable', 'poor'];
   const analysisTypes = [
     { key: 'raw', label: 'Raw' },
+    { key: 'weighted', label: 'Weighted summary' },
     { key: 'trends', label: 'Trends' },
   ];
 
