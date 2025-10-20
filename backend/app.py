@@ -133,8 +133,7 @@ def get_metrics():
     """)
     rows = cur.fetchall()
     cur.close()
-    return jsonify({"data": rows}), 200
-    
+    return jsonify({"data": rows}), 200    
 
 @app.route('/api/v1/summary', methods=['GET'])
 def get_summary():
@@ -230,25 +229,196 @@ def get_summary():
 
     return jsonify({"data": result}), 200
 
+
+
 @app.route('/api/v1/trends', methods=['GET'])
 def get_trends():
     """
-    Analyze trends and patterns in climate data.
-    Query parameters: location_id, start_date, end_date, metric, quality_threshold
-    
-    Returns trend analysis including direction, rate of change, anomalies, and seasonality.
+    Trend analysis per metric:
+    - trend: direction, rate (per month), confidence (|pearson r|)
+    - anomalies: z-score > 2
+    - seasonality: seasonal averages (winter/spring/summer/fall)
+    Optional filters: location_id, start_date, end_date, metric, quality_threshold
     """
-    # TODO: Implement this endpoint
-    # 1. Get query parameters from request.args
-    # 2. Validate quality_threshold if provided
-    # 3. For each metric:
-    #    - Calculate trend direction and rate of change
-    #    - Identify anomalies (values > 2 standard deviations)
-    #    - Detect seasonal patterns if sufficient data
-    #    - Calculate confidence scores
-    # 4. Format response according to API specification
-    
-    return jsonify({"data": {}})
+    cur = mysql.connection.cursor()
+
+    location_id = request.args.get('location_id', type=int)
+    metric = request.args.get('metric')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    quality_threshold = request.args.get('quality_threshold')
+
+    metric_norm = metric.lower().strip() if metric else None
+    qt_norm = quality_threshold.lower().strip() if quality_threshold else None
+
+    sql = """
+    SELECT
+      cd.date,
+      m.name AS metric,
+      m.unit AS unit,
+      cd.value,
+      cd.quality
+    FROM climate_data cd
+    JOIN metrics m ON m.id = cd.metric_id
+    WHERE
+      (%s IS NULL OR cd.location_id = %s) AND
+      (%s IS NULL OR m.name = %s) AND
+      (%s IS NULL OR cd.date >= %s) AND
+      (%s IS NULL OR cd.date <= %s) AND
+      (
+        %s IS NULL OR
+        FIELD(cd.quality, 'poor','questionable','good','excellent')
+          >= FIELD(%s, 'poor','questionable','good','excellent')
+      )
+    ORDER BY m.name ASC, cd.date ASC, cd.id ASC
+    """
+    params = [
+        location_id, location_id,
+        metric_norm, metric_norm,
+        start_date, start_date,
+        end_date, end_date,
+        qt_norm, qt_norm
+    ]
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+
+    # Group points by metric
+    groups = {}
+    for r in rows:
+        mname = r["metric"]
+        unit = r["unit"]
+        d = r["date"]
+        v = float(r["value"])
+        q = r["quality"]
+        groups.setdefault(mname, {"unit": unit, "points": []})
+        groups[mname]["points"].append((d, v, q))
+
+    def linear_trend_months(points):
+        # x as "months since start" to get rate per month
+        if len(points) < 2:
+            return 0.0, 0.0  # slope, |r|
+        xs = []
+        ys = []
+        for d, v, _ in points:
+            xm = d.year * 12 + d.month  # rough month index
+            xs.append(xm)
+            ys.append(v)
+        # Normalize x to start at 0
+        x0 = xs[0]
+        xs = [x - x0 for x in xs]
+
+        n = len(xs)
+        sx = sum(xs)
+        sy = sum(ys)
+        sxy = sum(x*y for x, y in zip(xs, ys))
+        sx2 = sum(x*x for x in xs)
+        sy2 = sum(y*y for y in ys)
+
+        denom = n * sx2 - sx * sx
+        if denom == 0:
+            slope = 0.0
+        else:
+            slope = (n * sxy - sx * sy) / denom  # units per month
+
+        denom_x = denom
+        denom_y = n * sy2 - sy * sy
+        if denom_x > 0 and denom_y > 0:
+            r = (n * sxy - sx * sy) / ((denom_x * denom_y) ** 0.5)
+            conf = abs(r)
+        else:
+            conf = 0.0
+        return slope, conf
+
+    def basic_stats(points):
+        ys = [v for _, v, _ in points]
+        n = len(ys)
+        if n == 0:
+            return 0.0, 0.0
+        mean = sum(ys) / n
+        var = (sum(y*y for y in ys) - (sum(ys) ** 2) / n) / n if n > 0 else 0.0
+        std = var ** 0.5
+        return mean, std
+
+    def seasonality(points):
+        # Month-of-year averages → seasons
+        if not points:
+            return {"detected": False, "period": "yearly", "confidence": 0.0, "pattern": {}}
+        month_buckets = {m: [] for m in range(1, 13)}
+        for d, v, _ in points:
+            month_buckets[d.month].append(v)
+        mavg = {m: (sum(vals) / len(vals)) if vals else None for m, vals in month_buckets.items()}
+
+        def avg_months(ms):
+            vals = [mavg[m] for m in ms if mavg[m] is not None]
+            return (sum(vals) / len(vals)) if vals else None
+
+        winter = avg_months([12, 1, 2])
+        spring = avg_months([3, 4, 5])
+        summer = avg_months([6, 7, 8])
+        fall = avg_months([9, 10, 11])
+
+        # Detect if seasonal swing is notable
+        vals = [x for x in [winter, spring, summer, fall] if x is not None]
+        if not vals:
+            return {"detected": False, "period": "yearly", "confidence": 0.0, "pattern": {}}
+        rng = max(vals) - min(vals)
+        mean, std = basic_stats(points)
+        conf = 0.0 if std == 0 else min(0.99, (rng / (std * 4.0)))
+        detected = rng > (0.5 if std == 0 else 0.5 * std)  # simple heuristic
+
+        def tlabel(a, b):
+            if a is None or b is None:
+                return "stable"
+            delta = b - a
+            return "increasing" if delta > 0.05 else ("decreasing" if delta < -0.05 else "stable")
+
+        pattern = {
+            "winter": {"avg": round(winter, 1) if winter is not None else None, "trend": "stable"},
+            "spring": {"avg": round(spring, 1) if spring is not None else None, "trend": tlabel(winter, spring)},
+            "summer": {"avg": round(summer, 1) if summer is not None else None, "trend": tlabel(spring, summer)},
+            "fall": {"avg": round(fall, 1) if fall is not None else None, "trend": tlabel(summer, fall)},
+        }
+        return {"detected": bool(detected), "period": "yearly", "confidence": round(conf, 2), "pattern": pattern}
+
+    out = {}
+    for metric_name, meta in groups.items():
+        pts = meta["points"]
+        unit = meta["unit"]
+
+        # Trend
+        slope, conf = linear_trend_months(pts)
+        direction = "increasing" if slope > 0.05 else ("decreasing" if slope < -0.05 else "stable")
+
+        # Anomalies (z-score > 2)
+        mean, std = basic_stats(pts)
+        anomalies = []
+        if std and std > 0:
+            for d, v, q in pts:
+                z = (v - mean) / std
+                if abs(z) > 2:
+                    anomalies.append({
+                        "date": d.isoformat(),
+                        "value": round(v, 1),
+                        "deviation": round(abs(z), 1),
+                        "quality": q
+                    })
+
+        # Seasonality
+        seas = seasonality(pts)
+
+        out[metric_name] = {
+            "trend": {
+                "direction": direction,
+                "rate": round(slope, 1),
+                "unit": f"{unit}/month" if unit else None,
+                "confidence": round(conf, 2),
+            },
+            "anomalies": anomalies,
+            "seasonality": seas
+        }
+
+    return jsonify({"data": out}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)

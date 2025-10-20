@@ -5,7 +5,6 @@
 const API_BASE_URL = 'http://127.0.0.1:5000/api/v1';
 
 const toQuery = (filters = {}) => {
-  // Map camelCase filters to snake_case query params expected by the backend
   const {
     locationId,
     startDate,

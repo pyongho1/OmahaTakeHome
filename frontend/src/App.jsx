@@ -29,7 +29,7 @@ function App() {
         if (!active) return;
         setLocations(locs);
         setMetrics(mets);
-        // console.log('Loaded locations:', locs.length, 'metrics:', mets.length);
+        console.log('Loaded locations:', locs.length, 'metrics:', mets.length);
       } catch (e) {
         console.error('Failed to load reference data', e);
       }
@@ -47,8 +47,6 @@ function App() {
         setClimateData([]);
       } else if (filters.analysisType === 'weighted') {
         const summary = await getClimateSummary(filters);
-        // Summary is an object keyed by metric; not directly compatible with ChartContainer’s time-series shape.
-        // You can later render this with a dedicated summary component.
         console.log('Summary data:', summary);
         setTrendData(null);
         setClimateData([]);
