@@ -2,6 +2,8 @@
 
 This project assesses full‑stack skills (Python, JavaScript, SQL) by building an interactive climate data explorer.
 
+See the full docs: `docs/documentation.md`.
+
 ## Prerequisites
 - Python 3.x
 - Node.js 18+ and npm
